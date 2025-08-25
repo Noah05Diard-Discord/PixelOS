@@ -83,9 +83,17 @@ local function buildStartMenu()
 		text = "Restart",
 		background = colors.gray, color = colors.white,
 		onClick = function()
+			-- Animate menu closing before showing confirmation
 			state.startMenuOpen = false
-			state.startMenu.visible = false
-			showConfirmation("Restart", "Restart PixelOS?", function() PixelOS.restart() end)
+			PixelUI.animate(state.startMenu, {
+				to = { x = -state.startMenu.width },
+				duration = 0.2,
+				easing = "inQuad",
+				onComplete = function()
+					state.startMenu.visible = false
+					showConfirmation("Restart", "Restart PixelOS?", function() PixelOS.restart() end)
+				end
+			})
 		end
 	})
 	state.startMenu:addChild(restartBtn)
@@ -96,9 +104,17 @@ local function buildStartMenu()
 		text = "Shutdown",
 		background = colors.gray, color = colors.white,
 		onClick = function()
+			-- Animate menu closing before showing confirmation
 			state.startMenuOpen = false
-			state.startMenu.visible = false
-			showConfirmation("Shutdown", "Shutdown PixelOS?", function() PixelOS.shutdown() end)
+			PixelUI.animate(state.startMenu, {
+				to = { x = -state.startMenu.width },
+				duration = 0.2,
+				easing = "inQuad",
+				onComplete = function()
+					state.startMenu.visible = false
+					showConfirmation("Shutdown", "Shutdown PixelOS?", function() PixelOS.shutdown() end)
+				end
+			})
 		end
 	})
 	state.startMenu:addChild(shutdownBtn)
@@ -155,31 +171,98 @@ end
 
 local function toggleStartMenu()
 	if not state.startMenu then buildStartMenu() end
-	state.startMenuOpen = not state.startMenuOpen
-	state.startMenu.visible = state.startMenuOpen
+	
+	if not state.startMenuOpen then
+		-- Opening animation: slide in from left
+		state.startMenuOpen = true
+		local finalX = 2
+		state.startMenu.x = -state.startMenu.width -- Start off-screen left
+		state.startMenu.visible = true
+		
+		-- Animate sliding in from left
+		PixelUI.animate(state.startMenu, {
+			to = { x = finalX },
+			duration = 0.3,
+			easing = "outQuad"
+		})
+	else
+		-- Closing animation: slide out to left
+		state.startMenuOpen = false
+		
+		-- Animate sliding out to left
+		PixelUI.animate(state.startMenu, {
+			to = { x = -state.startMenu.width },
+			duration = 0.2,
+			easing = "inQuad",
+			onComplete = function()
+				state.startMenu.visible = false
+			end
+		})
+	end
+	
+	-- Close clock menu if it's open
 	if state.startMenuOpen and state.clockMenuOpen then
 		state.clockMenuOpen = false
-		state.clockMenu.visible = false
+		PixelUI.animate(state.clockMenu, {
+			to = { x = term.getSize() + 1 },
+			duration = 0.2,
+			easing = "inQuad",
+			onComplete = function()
+				state.clockMenu.visible = false
+			end
+		})
 	end
 end
 
 local function toggleClockMenu()
 	if not state.clockMenu then buildClockMenu() end
 	
-	-- Only reposition and refresh when opening the menu
 	if not state.clockMenuOpen then
+		-- Opening animation: slide in from right
+		state.clockMenuOpen = true
 		local w, h = term.getSize()
-		-- Position the menu properly on the right side
-		state.clockMenu.x = w - state.clockMenu.width + 1
-		state.clockMenu.y = h - state.clockMenu.height
+		local finalX = w - state.clockMenu.width + 1
+		local finalY = h - state.clockMenu.height
+		
+		-- Position menu off-screen to the right
+		state.clockMenu.x = w + 1
+		state.clockMenu.y = finalY
+		state.clockMenu.visible = true
 		refreshClockMenu()
+		
+		-- Animate sliding in from right
+		PixelUI.animate(state.clockMenu, {
+			to = { x = finalX },
+			duration = 0.3,
+			easing = "outQuad"
+		})
+	else
+		-- Closing animation: slide out to right
+		state.clockMenuOpen = false
+		local w = term.getSize()
+		
+		-- Animate sliding out to right
+		PixelUI.animate(state.clockMenu, {
+			to = { x = w + 1 },
+			duration = 0.2,
+			easing = "inQuad",
+			onComplete = function()
+				state.clockMenu.visible = false
+			end
+		})
 	end
 	
-	state.clockMenuOpen = not state.clockMenuOpen
-	state.clockMenu.visible = state.clockMenuOpen
+	-- Close start menu if it's open
 	if state.clockMenuOpen and state.startMenuOpen then
 		state.startMenuOpen = false
-		state.startMenu.visible = false
+		PixelUI.animate(state.startMenu, {
+			to = { x = -state.startMenu.width },
+			duration = 0.2,
+			easing = "inQuad",
+			onComplete = function()
+				state.startMenu.visible = false
+			end
+		})
 	end
 end
 
@@ -231,16 +314,33 @@ local function registerEvents()
 			local m = state.startMenu
 			if not (x >= m.x and x < m.x + m.width and y >= m.y and y < m.y + m.height) and
 			   not (x >= state.startButton.x and x < state.startButton.x + state.startButton.width and y == state.taskbar.y) then
+				-- Animate closing
 				state.startMenuOpen = false
-				m.visible = false
+				PixelUI.animate(m, {
+					to = { x = -m.width },
+					duration = 0.2,
+					easing = "inQuad",
+					onComplete = function()
+						m.visible = false
+					end
+				})
 			end
 		end
 		if state.clockMenuOpen then
 			local m = state.clockMenu
 			if not (x >= m.x and x < m.x + m.width and y >= m.y and y < m.y + m.height) and
 			   not (x >= state.clockLabel.x and x < state.clockLabel.x + state.clockLabel.width and y == state.taskbar.y) then
+				-- Animate closing
 				state.clockMenuOpen = false
-				m.visible = false
+				local w = term.getSize()
+				PixelUI.animate(m, {
+					to = { x = w + 1 },
+					duration = 0.2,
+					easing = "inQuad",
+					onComplete = function()
+						m.visible = false
+					end
+				})
 			end
 		end
 	end)
