@@ -103,6 +103,16 @@ function PixelOS.restart()
     os.reboot()
 end
 
+--- Trigger a crash screen for testing
+function PixelOS.crash(message, stopCode, details)
+    local crashScreen = dofile("PixelOS/core/crash.lua")
+    if crashScreen then
+        crashScreen.show(message, stopCode, details)
+    else
+        error(message or "Manual crash triggered")
+    end
+end
+
 -- =============================================================================
 -- PROCESS MANAGEMENT
 -- =============================================================================
@@ -807,9 +817,26 @@ end
 
 -- Auto-initialize if not already done
 if not osState.booted then
-    local success, err = PixelOS.init()
+    local success, err = pcall(PixelOS.init)
     if not success then
-        error("Failed to initialize PixelOS: " .. err)
+        -- Load crash screen and show error
+        local crashScreen = dofile("PixelOS/core/crash.lua")
+        if crashScreen then
+            crashScreen.handleError("Failed to initialize PixelOS: " .. tostring(err))
+        else
+            error("Failed to initialize PixelOS: " .. err)
+        end
+    end
+end
+
+-- Set up global error handler
+local originalError = error
+function error(message, level)
+    local crashScreen = dofile("PixelOS/core/crash.lua")
+    if crashScreen then
+        crashScreen.handleError(message, debug.traceback())
+    else
+        originalError(message, level)
     end
 end
 
