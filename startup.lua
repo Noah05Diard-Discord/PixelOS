@@ -1,0 +1,1 @@
+shell.run("PixelOS/sys/bootloader.lua")
