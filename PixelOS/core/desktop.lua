@@ -1,8 +1,4 @@
 -- PixelOS Desktop (Minimal Taskbar Version)
--- Features implemented per request:
--- 1. Taskbar only.
--- 2. Start button on left. Left-click -> menu with Restart / Shutdown (each asks for confirmation).
--- 3. Clock on right. Left-click -> menu with toggle "Use IRL Time" (switch between real time and in‑game time).
 
 local PixelOS = dofile("PixelOS/core/libraries/PixelOS.lua")
 local PixelUI = dofile("PixelOS/core/libraries/pixelui.lua")
@@ -16,7 +12,9 @@ local state = {
 	startMenu = nil,
 	clockMenu = nil,
 	useRealTime = PixelOS.config.get("desktop.useRealTimeClock", true),
-	clockTimer = nil
+	clockTimer = nil,
+	clockMenuOpen = false,
+	startMenuOpen = false
 }
 
 -- In‑game clock (os.time returns fractional hours 0..24)
@@ -42,6 +40,7 @@ local function showConfirmation(title, message, onYes)
 			title = title,
 			message = message,
 			buttons = {"Yes", "No"},
+            border = true,
 			onButton = function(_, index, text)
 				if text == "Yes" then onYes() end
 			end
@@ -56,32 +55,49 @@ end
 local function buildStartMenu()
 	if state.startMenu then return end
 	local w, h = term.getSize()
-	-- Simple container based menu (auto-added to root by PixelUI.container)
+	-- Create a nice container with proper styling
 	state.startMenu = PixelUI.container({
-		x = 1,
-		y = h - 4, -- leave room above taskbar
-		width = 14,
-		height = 3, -- 2 buttons + background row
-		background = colors.black,
+		x = 2,
+        border = true,
+        borderColor = colors.blue,
+		y = h - 6, -- leave more room above taskbar
+		width = 16,
+		height = 5, -- room for title + 2 buttons + padding
+		background = colors.lightGray,
 		visible = false,
 		layout = "absolute"
 	})
+	
+	-- Menu title/header
+	local titleLabel = PixelUI.label({
+		x = 1, y = 1, width = 16, height = 1,
+		text = "  Start Menu  ",
+		background = colors.blue, color = colors.white,
+		align = "center"
+	})
+	state.startMenu:addChild(titleLabel)
+	
 	-- Restart button
 	local restartBtn = PixelUI.button({
-		x = 1, y = 1, width = 14, height = 1,
+		x = 2, y = 3, width = 12, height = 1,
 		text = "Restart",
 		background = colors.gray, color = colors.white,
 		onClick = function()
+			state.startMenuOpen = false
+			state.startMenu.visible = false
 			showConfirmation("Restart", "Restart PixelOS?", function() PixelOS.restart() end)
 		end
 	})
 	state.startMenu:addChild(restartBtn)
+	
 	-- Shutdown button
 	local shutdownBtn = PixelUI.button({
-		x = 1, y = 2, width = 14, height = 1,
+		x = 2, y = 4, width = 12, height = 1,
 		text = "Shutdown",
 		background = colors.gray, color = colors.white,
 		onClick = function()
+			state.startMenuOpen = false
+			state.startMenu.visible = false
 			showConfirmation("Shutdown", "Shutdown PixelOS?", function() PixelOS.shutdown() end)
 		end
 	})
@@ -92,29 +108,39 @@ local function buildClockMenu()
 	if state.clockMenu then return end
 	local w, h = term.getSize()
 	state.clockMenu = PixelUI.container({
-		x = w - 18,
-		y = h - 3,
-		width = 18,
-		height = 2,
-		background = colors.black,
+		x = w - 22,
+		y = h - 5,
+        border = true,
+		width = 22,
+		height = 4, -- room for title + toggle button + padding
+		background = colors.lightGray,
 		visible = false,
 		layout = "absolute"
 	})
-	-- Button added in refreshClockMenu
+	
+	-- Menu title/header
+	local titleLabel = PixelUI.label({
+		x = 1, y = 1, width = 22, height = 1,
+		text = "   Clock Settings   ",
+		background = colors.blue, color = colors.white,
+		align = "center"
+	})
+	state.clockMenu:addChild(titleLabel)
+	
+	-- Button will be added in refreshClockMenu
 end
 
 local function refreshClockMenu()
 	if not state.clockMenu then return end
-	-- Remove existing children (simple approach)
-	if state.clockMenu.children then
-		for i = #state.clockMenu.children, 1, -1 do
+	if state.clockMenu.children and #state.clockMenu.children > 1 then
+		for i = #state.clockMenu.children, 2, -1 do
 			local child = state.clockMenu.children[i]
 			state.clockMenu:removeChild(child)
 		end
 	end
 	local label = state.useRealTime and "On" or "Off"
 	local toggleBtn = PixelUI.button({
-		x = 1, y = 1, width = 18, height = 1,
+		x = 2, y = 3, width = 18, height = 1,
 		text = "Use IRL Time: " .. label,
 		background = colors.gray, color = colors.white,
 		onClick = function()
@@ -129,18 +155,32 @@ end
 
 local function toggleStartMenu()
 	if not state.startMenu then buildStartMenu() end
-	state.startMenu.visible = not state.startMenu.visible
-	if state.startMenu.visible and state.clockMenu then state.clockMenu.visible = false end
+	state.startMenuOpen = not state.startMenuOpen
+	state.startMenu.visible = state.startMenuOpen
+	if state.startMenuOpen and state.clockMenuOpen then
+		state.clockMenuOpen = false
+		state.clockMenu.visible = false
+	end
 end
 
 local function toggleClockMenu()
 	if not state.clockMenu then buildClockMenu() end
-	local w, h = term.getSize()
-	state.clockMenu.x = w - state.clockMenu.width + 1
-	state.clockMenu.y = h - 2 -- just above taskbar line
-	refreshClockMenu()
-	state.clockMenu.visible = not state.clockMenu.visible
-	if state.clockMenu.visible and state.startMenu then state.startMenu.visible = false end
+	
+	-- Only reposition and refresh when opening the menu
+	if not state.clockMenuOpen then
+		local w, h = term.getSize()
+		-- Position the menu properly on the right side
+		state.clockMenu.x = w - state.clockMenu.width + 1
+		state.clockMenu.y = h - state.clockMenu.height
+		refreshClockMenu()
+	end
+	
+	state.clockMenuOpen = not state.clockMenuOpen
+	state.clockMenu.visible = state.clockMenuOpen
+	if state.clockMenuOpen and state.startMenuOpen then
+		state.startMenuOpen = false
+		state.startMenu.visible = false
+	end
 end
 
 local function initTaskbar()
@@ -153,7 +193,7 @@ local function initTaskbar()
 	})
 	state.startButton = PixelUI.button({
 		x = 1, y = 1, width = 6, height = 1,
-		text = "Start", background = colors.lightGray, color = colors.black,
+		text = "Start", background = colors.lightGray, color = colors.black, clickEffect = true,
 		onClick = toggleStartMenu
 	})
 	state.taskbar:addChild(state.startButton)
@@ -187,17 +227,19 @@ local function registerEvents()
 		-- Ensure menus exist before hit-testing
 		if not state.startMenu then buildStartMenu() end
 		if not state.clockMenu then buildClockMenu() end
-		if state.startMenu and state.startMenu.visible then
+		if state.startMenuOpen then
 			local m = state.startMenu
 			if not (x >= m.x and x < m.x + m.width and y >= m.y and y < m.y + m.height) and
 			   not (x >= state.startButton.x and x < state.startButton.x + state.startButton.width and y == state.taskbar.y) then
+				state.startMenuOpen = false
 				m.visible = false
 			end
 		end
-		if state.clockMenu and state.clockMenu.visible then
+		if state.clockMenuOpen then
 			local m = state.clockMenu
 			if not (x >= m.x and x < m.x + m.width and y >= m.y and y < m.y + m.height) and
 			   not (x >= state.clockLabel.x and x < state.clockLabel.x + state.clockLabel.width and y == state.taskbar.y) then
+				state.clockMenuOpen = false
 				m.visible = false
 			end
 		end

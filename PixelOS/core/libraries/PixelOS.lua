@@ -1,6 +1,4 @@
 -- PixelOS API
--- A comprehensive operating system API for ComputerCraft: Tweaked
--- Built on top of PixelUI for modern, responsive user interfaces
 
 local PixelOS = {}
 

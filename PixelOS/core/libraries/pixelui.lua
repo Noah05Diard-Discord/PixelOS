@@ -532,7 +532,7 @@ function Widget:removeChild(child)
 end
 
 function Widget:handleClick(x, y)
-    if not self.enabled or not self.visible then return false end
+    if not self.enabled or not self:isEffectivelyVisible() then return false end
 
     local absX, absY = self:getAbsolutePos()
     local relX, relY = x - absX + 1, y - absY + 1
@@ -576,7 +576,7 @@ function Widget:handleClick(x, y)
 end
 -- Drag event handler for widgets
 function Widget:handleDrag(x, y)
-    if not self.enabled or not self.visible or not self.draggable then return false end
+    if not self.enabled or not self:isEffectivelyVisible() or not self.draggable then return false end
     local absX, absY = self:getAbsolutePos()
     local relX, relY = x - absX + 1, y - absY + 1
     -- Move widget based on drag offset
@@ -599,7 +599,7 @@ function Widget:handleDragEnd()
 end
 
 function Widget:draw()
-    if not self.visible then return end
+    if not self:isEffectivelyVisible() then return end
     
     self:render()
     
@@ -607,6 +607,20 @@ function Widget:draw()
     for _, child in ipairs(self.children) do
         child:draw()
     end
+end
+
+-- Check if widget is effectively visible (considering parent visibility)
+function Widget:isEffectivelyVisible()
+    if not self.visible then return false end
+    
+    -- Check parent visibility recursively
+    local parent = self.parent
+    while parent do
+        if not parent.visible then return false end
+        parent = parent.parent
+    end
+    
+    return true
 end
 
 function Widget:render()
@@ -2087,7 +2101,7 @@ function Container:calculateContentBounds()
 end
 
 function Container:draw()
-    if not self.visible then return end
+    if not self:isEffectivelyVisible() then return end
     self:render()
     
     -- Calculate content and viewport dimensions
@@ -2098,7 +2112,7 @@ function Container:draw()
     
     -- Draw children with scroll offset and clipping
     for _, child in ipairs(self.children) do
-        if child.visible ~= false then
+        if child.visible ~= false then -- Only check child's own visibility since parent visibility is checked by child:draw()
             -- Store original position
             local originalX, originalY = child.x, child.y
             
@@ -2134,7 +2148,7 @@ function Container:draw()
 end
 
 function Container:handleScroll(x, y, direction)
-    if not self.enabled or not self.visible or not self.isScrollable then return false end
+    if not self.enabled or not self:isEffectivelyVisible() or not self.isScrollable then return false end
     
     local absX, absY = self:getAbsolutePos()
     local relX, relY = x - absX + 1, y - absY + 1
@@ -2817,6 +2831,309 @@ function Canvas:clear(color)
             self.pixels[y][x] = {bg = color}
         end
     end
+end
+
+-- Image Widget
+local Image = setmetatable({}, {__index = Widget})
+Image.__index = Image
+
+function Image:new(props)
+    local image = Widget.new(self, props)
+    image.path = props.path or ""
+    image.background = props.background or colors.black
+    image.border = props.border or false
+    image.borderColor = props.borderColor or colors.white
+    image.scale = props.scale or 1
+    image.imageData = nil
+    image.loadError = nil
+    
+    -- Load the image on creation
+    image:loadImage()
+    
+    return image
+end
+
+function Image:loadImage()
+    if not self.path or self.path == "" then
+        self.loadError = "No image path specified"
+        return
+    end
+    
+    -- Check if file exists
+    if not fs.exists(self.path) then
+        self.loadError = "Image file not found: " .. self.path
+        return
+    end
+    
+    -- Detect file format based on extension
+    local extension = self.path:match("%.([^%.]+)$")
+    if extension then
+        extension = extension:lower()
+    end
+    
+    local success, result
+    
+    if extension == "nfp" then
+        -- Load NFP (ComputerCraft Pictures) format
+        success, result = pcall(function()
+            return self:loadNFP()
+        end)
+    elseif extension == "bimg" then
+        -- Load BIMG format
+        success, result = pcall(function()
+            return self:loadBIMG()
+        end)
+    else
+        -- Try to auto-detect format by attempting to load as NFP first, then BIMG
+        success, result = pcall(function()
+            -- First try NFP (text-based format)
+            local nfpResult = self:loadNFP()
+            if nfpResult then
+                return nfpResult
+            end
+            
+            -- If NFP fails, try BIMG (binary format)
+            return self:loadBIMG()
+        end)
+    end
+    
+    if success then
+        self.imageData = result
+        self.loadError = nil
+        
+        -- Auto-size widget to image if no size specified
+        if result and ((not self.width or self.width == 0) or (not self.height or self.height == 0)) then
+            if not self.width or self.width == 0 then
+                self.width = math.min(result.width * self.scale, 50) -- Cap at 50 for safety
+            end
+            if not self.height or self.height == 0 then
+                self.height = math.min(result.height * self.scale, 50) -- Cap at 50 for safety
+            end
+        end
+    else
+        self.loadError = "Error loading image: " .. tostring(result)
+        self.imageData = nil
+    end
+end
+
+function Image:loadNFP()
+    local file = fs.open(self.path, "r")
+    if not file then
+        error("Could not open NFP file: " .. self.path)
+    end
+    
+    local pixels = {}
+    local width = 0
+    local height = 0
+    local y = 1
+    
+    -- Color character mappings for NFP format
+    local colorMap = {
+        ["0"] = colors.white,
+        ["1"] = colors.orange,
+        ["2"] = colors.magenta,
+        ["3"] = colors.lightBlue,
+        ["4"] = colors.yellow,
+        ["5"] = colors.lime,
+        ["6"] = colors.pink,
+        ["7"] = colors.gray,
+        ["8"] = colors.lightGray,
+        ["9"] = colors.cyan,
+        ["a"] = colors.purple,
+        ["b"] = colors.blue,
+        ["c"] = colors.brown,
+        ["d"] = colors.green,
+        ["e"] = colors.red,
+        ["f"] = colors.black,
+        [" "] = nil -- Transparent/background
+    }
+    
+    local line = file.readLine()
+    while line do
+        pixels[y] = {}
+        width = math.max(width, #line)
+        
+        for x = 1, #line do
+            local char = line:sub(x, x):lower()
+            pixels[y][x] = colorMap[char]
+        end
+        
+        y = y + 1
+        line = file.readLine()
+    end
+    
+    height = y - 1
+    file.close()
+    
+    if height == 0 or width == 0 then
+        error("Invalid NFP file format")
+    end
+    
+    -- Fill in missing pixels with nil (transparent)
+    for row = 1, height do
+        if not pixels[row] then
+            pixels[row] = {}
+        end
+        for col = 1, width do
+            if pixels[row][col] == nil then
+                pixels[row][col] = nil -- Keep transparent
+            end
+        end
+    end
+    
+    return {
+        width = width,
+        height = height,
+        pixels = pixels
+    }
+end
+
+function Image:loadBIMG()
+    local file = fs.open(self.path, "rb")
+    if not file then
+        error("Could not open BIMG file: " .. self.path)
+    end
+    
+    -- Read BIMG header (basic implementation)
+    -- BIMG format: width(2 bytes), height(2 bytes), then pixel data
+    local widthLow = file.read()
+    local widthHigh = file.read()
+    local heightLow = file.read()
+    local heightHigh = file.read()
+    
+    if not widthLow or not widthHigh or not heightLow or not heightHigh then
+        file.close()
+        error("Invalid BIMG file format")
+    end
+    
+    local imgWidth = widthLow + widthHigh * 256
+    local imgHeight = heightLow + heightHigh * 256
+    
+    -- Read pixel data
+    local pixels = {}
+    for y = 1, imgHeight do
+        pixels[y] = {}
+        for x = 1, imgWidth do
+            local colorByte = file.read()
+            if colorByte then
+                -- Convert byte to ComputerCraft color
+                -- Simple mapping: 0-15 maps to colors.white to colors.black
+                local color = math.pow(2, colorByte % 16)
+                pixels[y][x] = color
+            else
+                pixels[y][x] = colors.black
+            end
+        end
+    end
+    
+    file.close()
+    
+    return {
+        width = imgWidth,
+        height = imgHeight,
+        pixels = pixels
+    }
+end
+
+function Image:render()
+    local absX, absY = self:getAbsolutePos()
+    
+    -- Draw border if enabled
+    if self.border then
+        drawCharBorder(absX, absY, self.width, self.height, self.borderColor, self.background)
+    end
+    
+    local startX = self.border and 1 or 0
+    local startY = self.border and 1 or 0
+    local endX = self.width - (self.border and 1 or 0)
+    local endY = self.height - (self.border and 1 or 0)
+    
+    -- Fill background first
+    term.setBackgroundColor(self.background)
+    for y = startY + 1, endY do
+        term.setCursorPos(absX + startX, absY + y - 1)
+        term.write(string.rep(" ", endX - startX))
+    end
+    
+    -- Render image or error message
+    if self.loadError then
+        -- Display error message
+        term.setTextColor(colors.red)
+        term.setBackgroundColor(self.background)
+        local errorLines = {}
+        local words = {}
+        for word in self.loadError:gmatch("%S+") do
+            table.insert(words, word)
+        end
+        
+        local currentLine = ""
+        local maxWidth = endX - startX
+        for _, word in ipairs(words) do
+            if #currentLine + #word + 1 <= maxWidth then
+                currentLine = currentLine .. (currentLine == "" and "" or " ") .. word
+            else
+                if currentLine ~= "" then
+                    table.insert(errorLines, currentLine)
+                end
+                currentLine = word
+            end
+        end
+        if currentLine ~= "" then
+            table.insert(errorLines, currentLine)
+        end
+        
+        for i, line in ipairs(errorLines) do
+            if i <= endY - startY then
+                term.setCursorPos(absX + startX, absY + startY + i - 1)
+                term.write(line:sub(1, maxWidth))
+            end
+        end
+        
+    elseif self.imageData then
+        -- Render the image
+        local imgData = self.imageData
+        local scaleX = (endX - startX) / imgData.width
+        local scaleY = (endY - startY) / imgData.height
+        
+        for y = 1, endY - startY do
+            for x = 1, endX - startX do
+                -- Map screen coordinates to image coordinates
+                local imgX = math.floor(x / scaleX) + 1
+                local imgY = math.floor(y / scaleY) + 1
+                
+                if imgX <= imgData.width and imgY <= imgData.height then
+                    local pixel = imgData.pixels[imgY] and imgData.pixels[imgY][imgX]
+                    if pixel then
+                        term.setBackgroundColor(pixel)
+                        term.setCursorPos(absX + startX + x - 1, absY + startY + y - 1)
+                        term.write(" ")
+                    end
+                    -- If pixel is nil (transparent), don't draw anything - keep background
+                end
+            end
+        end
+    else
+        -- Display placeholder
+        term.setTextColor(colors.lightGray)
+        term.setBackgroundColor(self.background)
+        local placeholder = "No Image"
+        local midY = math.floor((endY - startY) / 2) + startY
+        local midX = math.floor((endX - startX - #placeholder) / 2) + startX
+        term.setCursorPos(absX + midX, absY + midY)
+        term.write(placeholder)
+    end
+    
+    term.setBackgroundColor(colors.black)
+    term.setTextColor(colors.white)
+end
+
+function Image:setPath(newPath)
+    self.path = newPath
+    self:loadImage()
+end
+
+function Image:reload()
+    self:loadImage()
 end
 
 -- Chart Widget
@@ -4597,6 +4914,7 @@ end
 
 -- Alias draw to render for compatibility with the widget system
 function NotificationToast:draw()
+    if not self:isEffectivelyVisible() then return end
     self:render()
 end
 
@@ -8496,6 +8814,15 @@ function PixelUI.canvas(props)
         rootContainer:addChild(canvas)
     end
     return canvas
+end
+
+function PixelUI.image(props)
+    local image = Image:new(props)
+    table.insert(widgets, image)
+    if rootContainer then
+        rootContainer:addChild(image)
+    end
+    return image
 end
 
 function PixelUI.chart(props)

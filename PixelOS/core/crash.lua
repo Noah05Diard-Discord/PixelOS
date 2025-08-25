@@ -1,5 +1,4 @@
 -- PixelOS Crash Screen (Blue Screen of Death)
--- A Windows-style crash screen for PixelOS
 
 local PixelOS = _G.PixelOS or dofile("PixelOS/core/libraries/PixelOS.lua")
 local PixelUI = _G.PixelUI or dofile("PixelOS/core/libraries/pixelui.lua")
